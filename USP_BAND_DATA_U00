@@ -1,0 +1,185 @@
+USE [DONATE_SERVER]
+GO
+/****** Object:  StoredProcedure [dbo].[USP_BAND_DATA_U00]    Script Date: 2024/3/8 下午 04:16:15 ******/
+DROP PROCEDURE [dbo].[USP_BAND_DATA_U00]
+GO
+/****** Object:  StoredProcedure [dbo].[USP_BAND_DATA_U00]    Script Date: 2024/3/8 下午 04:16:15 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =============================================
+-- Author:		JIM
+-- Create date: 2022/12/01
+-- SP:          USP_BAND_DATA_U00
+-- Description:	更新品牌資料
+-- =============================================
+CREATE PROCEDURE [dbo].[USP_BAND_DATA_U00]
+    @ACTIONFLAG VARCHAR(255),
+    @DATAJSON NVARCHAR(MAX)
+AS
+CREATE TABLE #TMP_BAND_DATA(
+	BAND_ID     VARCHAR(20),
+	BAND_NAME   NVARCHAR(50),
+	BAND_ENABLE BIT,
+	BAND_TYPE   INT,
+	MTDT        DATETIME
+    )
+--SP公用參數
+  DECLARE
+    @ERR_NUM    INT,
+    @ERR_MSG    NVARCHAR(2048),
+    @SP_NM      VARCHAR(255),
+    @MSG        NVARCHAR(50)
+  DECLARE
+    @SP_USER_UUID    VARCHAR(32),   --唯一碼(主鍵)
+    @SP_BAND_ID      VARCHAR(20),   --品牌
+    @SP_BAND_NM      NVARCHAR(50),  --品牌名稱
+    @SP_BAND_ENABLE  BIT,           --品牌是否啟用
+	@SP_BAND_TYPE    INT,           --品牌類型
+    @SP_MTDT         DATETIME,      --維護日期
+    @SP_ACTION       VARCHAR(1),    --動作 D刪除 E 編輯 R 寫入
+    @SP_USER_RANK    INT,           --權限
+    @SP_USER_ACCOUNT VARCHAR(50),   --使用者帳號
+    @SP_USER_BAND_ID VARCHAR(50),   --使用者品牌
+    @SP_TMP_MTDT     DATETIME       --暫存
+
+  DECLARE
+    @TMP_BAND_ID     VARCHAR(20),  --品牌ID
+    @TMP_BAND_NAME   NVARCHAR(50), --品牌名稱
+    @TMP_BAND_ENABLE BIT,          --是否啟用
+	@TMP_BAND_TYPE   INT,          --品牌類型
+    @TMP_MTDT        DATETIME      --維護時間
+
+  SELECT @SP_USER_UUID = UUID      ,@SP_BAND_ID = BAND_ID ,@SP_BAND_NM = BAND_NM ,@SP_BAND_ENABLE = BAND_ENABLE ,
+         @SP_BAND_TYPE = BAND_TYPE ,@SP_MTDT = MTDT       ,@SP_ACTION = ACTION   ,@SP_USER_RANK = USER_RANK ,
+		 @SP_USER_ACCOUNT = USER_ACCOUNT, @SP_USER_BAND_ID = USER_BAND_ID
+    FROM OPENJSON(@DATAJSON)
+    WITH (UUID         VARCHAR(32)  '$.userdata.uuid',
+          BAND_ID      VARCHAR(20)  '$.data.band_id',
+          BAND_NM      NVARCHAR(50) '$.data.band_nm',
+          BAND_ENABLE  BIT          '$.data.band_enable',
+		  BAND_TYPE    INT          '$.data.band_type',
+          MTDT         DATETIME     '$.data.mtdt',
+          ACTION       VARCHAR(1)   '$.data.action',
+          USER_RANK    INT          '$.userdata.rank',
+          USER_ACCOUNT VARCHAR(50)  '$.userdata.account',
+          USER_BAND_ID VARCHAR(20)  '$.userdata.band_id')
+BEGIN
+	SET NOCOUNT ON;
+BEGIN TRY
+    BEGIN TRAN
+    SET @SP_NM = 'USP_BAND_DATA_U00'
+
+    IF @SP_USER_RANK != '10'
+       BEGIN
+          ROLLBACK TRAN
+          DROP TABLE #TMP_BAND_DATA
+          EXEC dbo.USP_SYS_LOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,@SP_NM ,@DATAJSON ,N'修改' , N'無權限，修改失敗', FALSE
+          SELECT N'無權限!' AS 'msg',
+                 CAST(0 AS BIT) AS 'successful',
+                 '' AS 'data',
+                 @ACTIONFLAG AS 'actionflag'
+          FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+          RETURN
+       END
+
+    INSERT INTO #TMP_BAND_DATA(BAND_ID    ,BAND_NAME     ,BAND_TYPE      ,BAND_ENABLE   , 
+                               MTDT       )
+                        SELECT A.BAND_ID  ,A.BAND_NAME   ,A.BAND_TYPE    ,A.BAND_ENABLE   , 
+                               A.MTDT
+                          FROM dbo.BAND_DATA AS A WITH (NOLOCK)
+                         WHERE A.BAND_ID = @SP_BAND_ID AND A.MTDT = @SP_MTDT
+    
+    IF NOT EXISTS (SELECT * FROM dbo.BAND_DATA AS A WITH (NOLOCK)
+                           WHERE A.BAND_ID = @SP_BAND_ID AND A.MTDT = @SP_MTDT)
+       BEGIN
+          ROLLBACK TRAN
+          DROP TABLE #TMP_BAND_DATA
+          EXEC dbo.USP_SYS_LOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,@SP_NM ,@DATAJSON ,N'修改' , N'品牌不存在，修改失敗', FALSE
+          SELECT N'品牌不存在!' AS 'msg',
+                 CAST(0 AS BIT) AS 'successful',
+                 '' AS 'data',
+                 @ACTIONFLAG AS 'actionflag'
+          FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+          RETURN
+       END
+
+    SELECT @TMP_BAND_ID = A.BAND_ID,@TMP_BAND_NAME = A.BAND_NAME ,@TMP_BAND_TYPE = A.BAND_TYPE ,@TMP_BAND_ENABLE = A.BAND_ENABLE, @TMP_BAND_TYPE = A.BAND_TYPE,
+           @TMP_MTDT = A.MTDT
+      FROM #TMP_BAND_DATA AS A WITH (NOLOCK)
+     WHERE A.BAND_ID = @SP_BAND_ID AND A.MTDT = @SP_MTDT
+
+    SET @SP_TMP_MTDT = GETDATE()
+
+    IF @SP_ACTION = 'E' OR @SP_ACTION = 'R'
+       BEGIN
+         UPDATE dbo.BAND_DATA SET BAND_ENABLE = CASE WHEN CONVERT(VARCHAR(2),@SP_BAND_ENABLE) = '' OR @SP_BAND_ENABLE IS NULL THEN @TMP_BAND_ENABLE ELSE CONVERT(VARCHAR(2), @SP_BAND_ENABLE)  END,
+                                  BAND_NAME = CASE WHEN @SP_BAND_NM = '' OR @SP_BAND_NM IS NULL THEN @TMP_BAND_NAME ELSE @SP_BAND_NM END,
+								  BAND_TYPE = CASE WHEN @SP_BAND_TYPE = '' OR @SP_BAND_TYPE IS NULL THEN @TMP_BAND_TYPE ELSE @SP_BAND_TYPE END,
+                                  MTDT = @SP_TMP_MTDT
+          WHERE BAND_ID = @SP_BAND_ID AND 
+                MTDT = @SP_MTDT
+	      --品牌類型的付款方式不同 所以清除所有付款方式資料
+		  IF @TMP_BAND_TYPE != @SP_BAND_TYPE AND @SP_BAND_ID IS NOT NULL
+		     BEGIN
+			    DELETE dbo.PLAT_HASH_DATA WHERE BAND_ID = @SP_BAND_ID 
+			 END
+       END
+
+    IF @SP_ACTION = 'D'
+       BEGIN
+         DELETE A 
+          FROM dbo.ACCOUNT_SETTING_DATA AS A
+          LEFT JOIN dbo.ACCOUNT_M AS B
+            ON A.ACCOUNT = B.ACCOUNT
+          WHERE B.BAND_ID = @SP_BAND_ID 
+
+         DELETE A 
+           FROM dbo.DONATE_SETTING_DATA AS A
+           LEFT JOIN dbo.ACCOUNT_M AS B
+             ON A.ACCOUNT = B.ACCOUNT
+          WHERE B.BAND_ID = @SP_BAND_ID 
+
+         DELETE dbo.ACCOUNT_M WHERE BAND_ID = @SP_BAND_ID 
+
+         DELETE dbo.PLAT_HASH_DATA WHERE BAND_ID = @SP_BAND_ID 
+
+         DELETE dbo.PLAT_SETTING_DATA WHERE BAND_ID = @SP_BAND_ID 
+
+         DELETE dbo.BAND_DATA
+          WHERE BAND_ID = @SP_BAND_ID
+       END
+
+    COMMIT TRAN
+    DROP TABLE #TMP_BAND_DATA
+
+    SELECT  @MSG = CASE WHEN @SP_ACTION = 'E' THEN N'品牌資料修改成功!'
+                        WHEN @SP_ACTION = 'R' THEN N'已'+ CASE WHEN @SP_BAND_ENABLE = '1' THEN N'啟用' ELSE N'停用' END + '!'
+                        WHEN @SP_ACTION = 'D' THEN N'刪除成功!'
+                   END
+    EXEC dbo.USP_SYS_LOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,@SP_NM ,@DATAJSON ,N'修改' , @MSG, TRUE
+    SELECT @MSG AS 'msg',
+           CAST(1 AS BIT) AS 'successful',
+           @SP_TMP_MTDT AS 'data.mtdt',
+           @ACTIONFLAG AS 'actionflag'
+       FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+
+END TRY
+BEGIN CATCH
+    ROLLBACK TRAN
+    DROP TABLE #TMP_BAND_DATA
+    SET @ERR_NUM = ERROR_NUMBER()
+    SET @ERR_MSG = ERROR_MESSAGE()
+    --未記錄錯誤
+    EXEC dbo.USP_ERRORLOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,@SP_NM ,@DATAJSON ,@ERR_NUM ,@ERR_MSG
+    SET @ERR_MSG = N'SP執行發生錯誤，' +  @ERR_MSG
+    EXEC dbo.USP_SYS_LOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,@SP_NM ,@DATAJSON ,N'修改' , @ERR_MSG, FALSE
+    SELECT N'修改發生錯誤!' AS 'msg',
+       CAST(0 AS BIT) AS 'successful',
+       '' AS 'data',
+       @ACTIONFLAG AS 'actionflag'
+       FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+END CATCH
+END
+GO
