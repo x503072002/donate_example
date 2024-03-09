@@ -1,0 +1,71 @@
+USE [DONATE_SERVER]
+GO
+/****** Object:  StoredProcedure [dbo].[USP_BAND_DATA_S00]    Script Date: 2024/3/8 下午 04:16:15 ******/
+DROP PROCEDURE [dbo].[USP_BAND_DATA_S00]
+GO
+/****** Object:  StoredProcedure [dbo].[USP_BAND_DATA_S00]    Script Date: 2024/3/8 下午 04:16:15 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =============================================
+-- Author:		JIM
+-- Create date: 2022/12/01
+-- SP:          USP_BAND_DATA_S00
+-- Description:	品牌資料查詢
+-- =============================================
+CREATE PROCEDURE [dbo].[USP_BAND_DATA_S00]
+    @ACTIONFLAG VARCHAR(255),
+    @DATAJSON   NVARCHAR(MAX)
+AS
+  DECLARE
+    @SP_USER_RANK     INT         ,
+    @SP_BAND_ID　     NVARCHAR(50),
+    @SP_USER_BAND_ID　VARCHAR(20) ,
+    @SP_USER_ACCOUNT  VARCHAR(50),
+    @SP_USER_UUID     VARCHAR(32)
+
+  SELECT @SP_BAND_ID = BAND_ID ,@SP_USER_RANK = USER_RANK , @SP_USER_BAND_ID = USER_BAND_ID,
+         @SP_USER_ACCOUNT = USER_ACCOUNT,@SP_USER_UUID = USER_UUID
+    FROM OPENJSON(@DATAJSON)
+    WITH (BAND_ID      NVARCHAR(50) '$.data.band_id',
+          USER_UUID    VARCHAR(32)  '$.userdata.uuid',
+          USER_RANK    INT          '$.userdata.rank',
+          USER_BAND_ID VARCHAR(20)  '$.userdata.band_id',
+          USER_ACCOUNT VARCHAR(50)  '$.userdata.account')
+BEGIN
+	SET NOCOUNT ON;
+
+    IF @SP_USER_RANK != 10
+       BEGIN
+         EXEC dbo.USP_SYS_LOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,'USP_BAND_DATA_S00' ,@DATAJSON ,N'查詢' , N'無權限，查詢失敗', FALSE
+         SELECT N'無權限!' AS 'msg',
+                CAST(0 AS BIT) AS 'successful',
+                '' AS 'data',
+                @ACTIONFLAG AS 'actionflag'
+          FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+         RETURN
+       END
+
+    EXEC dbo.USP_SYS_LOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,'USP_BAND_DATA_S00' ,@DATAJSON ,N'查詢' , N'查詢成功', TRUE
+    SELECT CAST(1 AS BIT) AS 'successful',
+           '' AS 'msg',
+           (SELECT COUNT(A.ACCOUNT) AS 'band_count',
+                   A.BAND_ID AS 'band_id', 
+                   A.BAND_NAME AS 'band_nm',
+				   A.BAND_TYPE AS 'band_type',
+                   REPLACE(CONVERT(VARCHAR(19), A.CRTDT,121),'-' ,'/') AS 'crtdt',
+                   CONVERT(VARCHAR(1), A.BAND_ENABLE) AS 'band_enable',
+                   CASE WHEN A.BAND_ENABLE = 1 THEN N'啟用' ELSE N'停用' END AS 'status_nm',
+                   A.MTDT AS 'mtdt'
+              FROM (SELECT A.BAND_ID , A.BAND_NAME, A.BAND_TYPE, A.CRTDT, A.BAND_ENABLE, A.MTDT, B.ACCOUNT
+                      FROM dbo.BAND_DATA AS A WITH (NOLOCK) 
+                      LEFT JOIN  dbo.ACCOUNT_M AS B WITH (NOLOCK) ON A.BAND_ID = B.BAND_ID
+                     WHERE  A.BAND_ID  LIKE @SP_BAND_ID+'%') AS A
+                     GROUP BY A.BAND_ID, A.BAND_NAME, A.BAND_TYPE, A.BAND_ENABLE, A.CRTDT, A.MTDT
+                     ORDER BY A.BAND_ID ASC
+                       FOR JSON PATH) AS 'data',
+           '' AS 'actionflag'
+       FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+END
+GO
