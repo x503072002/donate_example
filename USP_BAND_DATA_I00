@@ -1,0 +1,112 @@
+USE [DONATE_SERVER]
+GO
+/****** Object:  StoredProcedure [dbo].[USP_BAND_DATA_I00]    Script Date: 2024/3/8 下午 04:16:15 ******/
+DROP PROCEDURE [dbo].[USP_BAND_DATA_I00]
+GO
+/****** Object:  StoredProcedure [dbo].[USP_BAND_DATA_I00]    Script Date: 2024/3/8 下午 04:16:15 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =============================================
+-- Author:		JIM
+-- Create date: 2022/11/30
+-- SP:          USP_BAND_DATA_I00
+-- Description:	新增用戶資料
+-- =============================================
+CREATE PROCEDURE [dbo].[USP_BAND_DATA_I00]
+    @ACTIONFLAG VARCHAR(255),
+    @DATAJSON NVARCHAR(MAX)
+AS
+--SP公用參數
+  DECLARE
+    @ERR_NUM    INT,
+    @ERR_MSG    NVARCHAR(2048),
+    @SP_NM      VARCHAR(255),
+    @MSG        NVARCHAR(50)
+  DECLARE
+    @SP_BAND_ID      VARCHAR(20),   --品牌
+    @SP_BAND_NM      NVARCHAR(50),  --帳號
+    @SP_BAND_ENABLE  BIT,           --帳號是否啟用
+	@SP_BAND_TYPE    INT,           --品牌類型
+    @SP_CRTDT        DATETIME,      --維護日期
+    @SP_USER_RANK    INT,           --權限
+    @SP_USER_BAND_ID VARCHAR(20),   --使用者品牌
+    @SP_USER_ACCOUNT VARCHAR(50),   --使用者帳號
+    @SP_USER_UUID    VARCHAR(32)    --UUID
+
+  SELECT @SP_BAND_NM = BAND_NM           ,@SP_BAND_ENABLE = BAND_ENABLE  , @SP_BAND_TYPE = BAND_TYPE,
+         @SP_USER_RANK = USER_RANK ,
+         @SP_USER_BAND_ID = USER_BAND_ID ,@SP_USER_ACCOUNT = USER_ACCOUNT,
+         @SP_USER_UUID = USER_UUID
+    FROM OPENJSON(@DATAJSON)
+    WITH (BAND_NM      NVARCHAR(50) '$.data.band_nm',
+          BAND_ENABLE  BIT          '$.data.band_enable',
+		  BAND_TYPE    INT          '$.data.band_type',
+          USER_RANK    INT          '$.userdata.rank',
+          USER_BAND_ID VARCHAR(20)  '$.userdata.band_id',
+          USER_ACCOUNT VARCHAR(50)  '$.userdata.account',
+          USER_UUID    VARCHAR(32)  '$.userdata.uuid')
+BEGIN
+	SET NOCOUNT ON;
+BEGIN TRY
+    BEGIN TRAN
+    SET @SP_NM = 'USP_BAND_DATA_I00'
+
+    IF @SP_USER_RANK != '10'
+       BEGIN
+          ROLLBACK TRAN
+          EXEC dbo.USP_SYS_LOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,@SP_NM ,@DATAJSON ,N'新增' , N'無權限，新增失敗', FALSE
+          SELECT N'無權限!' AS 'msg',
+                 CAST(0 AS BIT) AS 'successful',
+                 '' AS 'data',
+                 @ACTIONFLAG AS 'actionflag'
+          FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+          RETURN
+       END
+
+    --取最大號 前兩碼預留為A0
+    SELECT @SP_BAND_ID = (SUBSTRING(MAX (BAND_ID) ,0, 3)+RIGHT(REPLICATE('0', 4) + CAST((CONVERT(INT, SUBSTRING(MAX (BAND_ID) ,3, 4))+1) AS VARCHAR), 4)) FROM dbo.BAND_DATA WITH(NOLOCK)
+
+    IF EXISTS (SELECT * FROM dbo.BAND_DATA AS A WITH(NOLOCK) WHERE A.BAND_ID = @SP_BAND_ID OR A.BAND_NAME = @SP_BAND_NM)
+       BEGIN
+         ROLLBACK TRAN
+         EXEC dbo.USP_SYS_LOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,@SP_NM ,@DATAJSON ,N'新增' , N'品牌已存在，新增失敗', FALSE
+         SELECT N'品牌已存在!' AS 'msg',
+                CAST(0 AS BIT) AS 'successful',
+                '' AS 'data',
+                @ACTIONFLAG AS 'actionflag'
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+         RETURN
+       END
+
+    --取得現在時間
+    SET @SP_CRTDT = GETDATE()
+
+    INSERT INTO dbo.BAND_DATA (BAND_ID    , BAND_NAME  , BAND_TYPE, BAND_ENABLE     , MTDT     , CRTDT)
+                       VALUES (@SP_BAND_ID, @SP_BAND_NM, @SP_BAND_TYPE, @SP_BAND_ENABLE , @SP_CRTDT, @SP_CRTDT)
+
+    COMMIT TRAN
+    EXEC dbo.USP_SYS_LOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,@SP_NM ,@DATAJSON ,N'新增' , N'新增品牌成功', TRUE
+    SELECT N'新增品牌成功!' AS 'msg',
+           CAST(1 AS BIT) AS 'successful',
+           @ACTIONFLAG AS 'actionflag'
+       FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+END TRY
+BEGIN CATCH
+    ROLLBACK TRAN
+
+    SET @ERR_NUM = ERROR_NUMBER()
+    SET @ERR_MSG = ERROR_MESSAGE()
+    --未記錄錯誤
+    EXEC dbo.USP_ERRORLOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,@SP_NM ,@DATAJSON ,@ERR_NUM ,@ERR_MSG
+    SET @ERR_MSG = N'SP執行發生錯誤，' +  @ERR_MSG
+    EXEC dbo.USP_SYS_LOG_I00 @SP_USER_UUID ,@SP_USER_BAND_ID ,@SP_USER_ACCOUNT ,@ACTIONFLAG ,@SP_NM ,@DATAJSON ,N'新增' , @ERR_MSG, FALSE
+    SELECT N'修改發生錯誤!' AS 'msg',
+       CAST(0 AS BIT) AS 'successful',
+       '' AS 'data',
+       @ACTIONFLAG AS 'actionflag'
+       FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+END CATCH
+END
+GO
