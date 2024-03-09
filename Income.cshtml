@@ -1,0 +1,174 @@
+@{
+    Layout = "~/Views/Shared/MainLayout.cshtml";
+    ViewBag.Title = "斗內後台-收款列表";
+}
+<div class="query-title">
+    <div class="query-title-div" data-bs-toggle="collapse" aria-expanded="true" aria-controls="query">
+        <label class="query-title-font">收款列表</label>
+    </div>
+    <div class="query-tool-bar">
+        <button class="btn btn-primary query-search-btn" @@click="onClickSearch()" title="搜尋"><i class="fas fa-search"></i></button>
+        <button class="btn btn-primary query-trash-btn" @@click="onClickClear()" title="清除查詢"><i class="fa fa-broom"></i></button>
+        <button class="btn btn-primary query-trash-btn" @@click="onClickExport()" title="匯出"><i class="fa fa-file-export"></i></button>
+    </div>
+
+    <div class="col-xl-3 query-quickseatch">
+        <div class="col-sm-5 query-label">
+            <label class="d-576px-none">快速查詢:</label>
+        </div>
+        <div class="col-sm-7">
+            <select class="form-select form-select-sm" aria-label=".form-select-sm" @@change="onChangeQuick($event)" >
+                <option v-for="(datetime, index) in datetime" :value="datetime.id">{{datetime.name}}</option>
+            </select>
+        </div>
+    </div>
+</div>
+<p style="color:red" title="誤差值原因: 千次點閱收益、廣告收益、蘋果手機的斗內會有額外蘋果他們的抽成、續約會員後台抓不到資料會存在一點誤差。" >本後台的金額僅供參考，會與實際上會有誤差，我們盡可能拉小誤差值。</p>
+
+<div class="collapse show" id="query">
+    <div class="card bg-card">
+        <div class="card-body">
+            <div class="row">
+                <div  v-if="userRank!= 0" class="col-lg-6 form-div">
+                    <div class="col-lg-3">
+                        <label>品牌:</label>
+                    </div>
+                    <div class="col-lg-7">
+                        <select style="max-width:180px" class="form-select form-select-sm" aria-label=".form-select-sm" v-model="query.band_id">
+                            <option v-for="(band, index) in bandlist" :value="band.id">{{band.name}}</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="col-lg-6 form-div">
+                    <div class="col-lg-3">
+                        <label>暱稱:</label>
+                    </div>
+                    <div class="col-lg-7">
+                        <select :disabled="userlist.length == 1" style="max-width:180px" class="form-control form-select form-select-sm" aria-label=".form-select-sm" v-model="query.account">
+                            <option v-for="(user, index) in userlist" :value="user.id">{{user.name}}</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-6 form-div">
+                    <div class="col-lg-3">
+                        <label>訂單編號:</label>
+                    </div>
+                    <div class="col-lg-7">
+                        <input type="text" class="form-control form-control-sm" style="max-width:220px;" v-model="query.donate_no" maxlength="20" />
+                    </div>
+                </div>
+                <div class="col-lg-6 form-div">
+                    <div class="col-lg-3">
+                        <label>交易狀態:</label>
+                    </div>
+                    <div class="col-lg-7">
+                        <select style="max-width:180px" class="form-select form-select-sm" aria-label=".form-select-sm" v-model="query.donate_status">
+                            <option v-for="(donate_status, index) in donatestatuslist" :value="donate_status.id">{{donate_status.name}}</option>
+                        </select>
+                    </div>
+                </div>
+
+            </div>
+            <div class="row">
+                <div class="col-lg-6 form-div">
+                    <div class="col-lg-3">
+                        <label>建立時間:</label>
+                    </div>
+                    <div class="col-lg-7">
+                        <div id="datepicker" class="input-daterange input-group">
+                            <div class="form-group form-control">
+                                <input id="datepickerstart" type="text" class="input-sm form-control" name="start"
+                                       :value="query.donate_time_st" /><!-- onfocus="blur();"-->
+                                <div style="pointer-events: none;" class="calendarBtn">
+                                    <i class="fas fa-calendar-alt"></i>
+                                </div>
+                            </div>
+                            <span class="input-group-addon">~</span>
+                            <div class="form-group form-control input-calendar">
+                                <input id="datepickerend" type="text" class="input-sm form-control" name="end"
+                                       :value="query.donate_time_ed" />
+                                <div style="pointer-events: none;" class="calendarBtn">
+                                    <i class="fas fa-calendar-alt"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6 form-div">
+                    <div class="col-lg-3">
+                        <label>訂單來源:</label>
+                    </div>
+                    <div class="col-lg-7">
+                        <select style="max-width:180px" class="form-select form-select-sm" aria-label=".form-select-sm" v-model="query.donate_plat" >
+                            <option v-for="(donate_plat, index) in donateplatlist" :value="donate_plat.id">{{donate_plat.name}}</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="row" style="margin:10px 0px">
+    <label>查詢結果:</label>
+</div>
+<div class="card bg-card ">
+    <div class="card-body table-responsive">
+        <div class="table-scroll">
+            <table class="table table-dark table-hover">
+                <thead>
+                    <tr>
+                        <th scope="col" style="min-width: 100px; text-align: center;">暱稱</th>
+                        <th v-if="userRank!= 0" scope="col" style="min-width: 140px; text-align: center;">品牌</th>
+                        <th scope="col" style="min-width: 200px; text-align: center;">訂單編號</th>
+                        <th scope="col" style="min-width: 90px; text-align: center;">訂單來源</th>
+                        <th scope="col" style="min-width: 90px; text-align: center;">收款金額</th>
+                        <th scope="col" style="min-width: 80px; text-align: center;">手續費</th>
+                        <th scope="col" style="min-width: 90px; text-align: center;">實收</th>
+                        <th scope="col" style="min-width: 100px; text-align: center; ">狀態</th>
+                        <th scope="col" style="min-width: 175px; text-align: center;">時間</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="(incomeData, index) in incomeData">
+                        <td>{{incomeData.username}}</td>
+                        <td v-if="userRank!= 0">{{incomeData.band_nm}}</td>
+                        <td>{{incomeData.donate_no}}</td>
+                        <td>{{incomeData.donate_plat_nm}}</td>
+                        <td style="min-width: 90px; text-align: right;">{{incomeData.donate_currency+formatNum(incomeData.donate_amount)}}</td>
+                        <td style="min-width: 80px; text-align: right;">{{incomeData.donate_currency+formatNum(incomeData.donate_fee)}}</td>
+                        <td style="min-width:90px; text-align:right;">{{incomeData.donate_currency+formatNum(incomeData.donate_income)}}</td>
+                        <td>{{incomeData.donate_status_nm}}</td>
+                        <td>{{incomeData.donate_patdt}}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="table-bottom">
+            <div>
+                <span>總計金額:{{formatNum(Math.round(total_amount))}}元</span>
+                <span>　</span>
+                <span>總計:{{totallegth}}筆</span>
+            </div>
+        </div>
+        <nav aria-label="Page navigation" style="user-select: none;">
+            <ul class="data-pagination justify-content-center">
+                <li class="page-item" @@click="onChangePage(nowpage-1)">
+                    <button class="page-link" href="" aria-label="Previous">
+                        <span aria-hidden="true">&laquo;</span>
+                    </button>
+                </li>
+                <li v-for="page in totalpage" v-show="!(page < nowpage -3 || page > nowpage + 3) || (nowpage < 4 && page < 8) || (nowpage > totalpage - 4 && page > totalpage -8 )" :class="{'page-item':true,'active': page == nowpage}" @@click="onChangePage(page)">
+                    <button class="page-link" href="">{{page}}</button>
+                </li>
+                <li class="page-item" @@click="onChangePage(nowpage+1)">
+                    <button class="page-link" href="" aria-label="Next">
+                        <span aria-hidden="true">&raquo;</span>
+                    </button>
+                </li>
+            </ul>
+        </nav>
+    </div>
+
+</div>
