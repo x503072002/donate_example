@@ -7,4 +7,4 @@
 斗內通知演示:
 ![斗內通知](/斗內通知.gif "斗內通知")
 斗內通知實際演示:
-[YT演示](https://www.youtube.com/watch?v=ODCLOEr-6BE&t=3923s)
+[YT演示](https://www.youtube.com/watch?v=ODCLOEr-6BE&t=3920s)
